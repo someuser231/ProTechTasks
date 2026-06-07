@@ -1,5 +1,13 @@
+using BenchmarkDotNet.Running;
 using ProTechTasks.Algorithms;
+using ProTechTasks.Benchmarks;
 using ProTechTasks.Models;
+
+if (args.Length > 0 && args[0] == "--benchmark")
+{
+    BenchmarkRunner.Run<SearchBenchmarks>();
+    return;
+}
 
 var builder = WebApplication.CreateBuilder(args);
 var app = builder.Build();
