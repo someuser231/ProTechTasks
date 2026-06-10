@@ -1,10 +1,23 @@
 using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Configs;
 using ProTechTasks.Algorithms;
 using ProTechTasks.Models;
 
 namespace ProTechTasks.Benchmarks;
 
+public class BenchmarkConfig : ManualConfig
+{
+    public BenchmarkConfig()
+    {
+        WithOptions(ConfigOptions.DisableOptimizationsValidator);
+        AddLogger(DefaultConfig.Instance.GetLoggers().ToArray());
+        AddColumnProvider(DefaultConfig.Instance.GetColumnProviders().ToArray());
+        AddExporter(DefaultConfig.Instance.GetExporters().ToArray());
+    }
+}
+
 [MemoryDiagnoser]
+[Config(typeof(BenchmarkConfig))]
 public class SearchBenchmarks
 {
     private List<Driver> _drivers = new List<Driver>();
