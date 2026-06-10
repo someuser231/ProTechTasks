@@ -30,6 +30,8 @@ public class SearchBenchmarks
             driver.Y = random.Next(0, 1000);
             _drivers.Add(driver);
         }
+
+        _grid.BuildIndex(_drivers);
     }
 
     [Benchmark]

@@ -5,15 +5,16 @@ namespace ProTechTasks.Algorithms;
 public class GridPartitionAlgorithm
 {
     private readonly int _cellSize;
+    private Dictionary<(int, int), List<Driver>> _grid = new Dictionary<(int, int), List<Driver>>();
 
     public GridPartitionAlgorithm(int cellSize = 50)
     {
         _cellSize = cellSize;
     }
 
-    public List<Driver> FindNearest(List<Driver> drivers, int orderX, int orderY, int count = 5)
+    public void BuildIndex(List<Driver> drivers)
     {
-        var grid = new Dictionary<(int, int), List<Driver>>();
+        _grid = new Dictionary<(int, int), List<Driver>>();
 
         for (int i = 0; i < drivers.Count; i++)
         {
@@ -22,14 +23,17 @@ public class GridPartitionAlgorithm
             int cellY = driver.Y / _cellSize;
             var cellKey = (cellX, cellY);
 
-            if (!grid.ContainsKey(cellKey))
+            if (!_grid.ContainsKey(cellKey))
             {
-                grid[cellKey] = new List<Driver>();
+                _grid[cellKey] = new List<Driver>();
             }
 
-            grid[cellKey].Add(driver);
+            _grid[cellKey].Add(driver);
         }
+    }
 
+    public List<Driver> FindNearest(List<Driver> drivers, int orderX, int orderY, int count = 5)
+    {
         int orderCellX = orderX / _cellSize;
         int orderCellY = orderY / _cellSize;
 
@@ -40,7 +44,7 @@ public class GridPartitionAlgorithm
         {
             if (radius == 0)
             {
-                CollectCell(grid, orderCellX, orderCellY, candidates);
+                CollectCell(orderCellX, orderCellY, candidates);
             }
             else
             {
@@ -50,7 +54,7 @@ public class GridPartitionAlgorithm
                     {
                         if (Math.Abs(dx) == radius || Math.Abs(dy) == radius)
                         {
-                            CollectCell(grid, orderCellX + dx, orderCellY + dy, candidates);
+                            CollectCell(orderCellX + dx, orderCellY + dy, candidates);
                         }
                     }
                 }
@@ -92,12 +96,12 @@ public class GridPartitionAlgorithm
         return candidates.Take(count).ToList();
     }
 
-    private static void CollectCell(Dictionary<(int, int), List<Driver>> grid, int cx, int cy, List<Driver> result)
+    private void CollectCell(int cx, int cy, List<Driver> result)
     {
         var cellKey = (cx, cy);
-        if (grid.ContainsKey(cellKey))
+        if (_grid.ContainsKey(cellKey))
         {
-            result.AddRange(grid[cellKey]);
+            result.AddRange(_grid[cellKey]);
         }
     }
 

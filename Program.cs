@@ -27,6 +27,7 @@ for (int i = 1; i <= 20; i++)
 var linearAlgorithm = new LinearSortAlgorithm();
 var priorityQueueAlgorithm = new PriorityQueueAlgorithm();
 var gridAlgorithm = new GridPartitionAlgorithm(cellSize: 10);
+gridAlgorithm.BuildIndex(drivers);
 
 app.MapGet("/", () => "ProTechTasks Driver Search API\n");
 
