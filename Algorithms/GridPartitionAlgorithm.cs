@@ -32,7 +32,7 @@ public class GridPartitionAlgorithm
         }
     }
 
-    public List<Driver> FindNearest(List<Driver> drivers, int orderX, int orderY, int count = 5)
+    public List<Driver> FindNearest(int orderX, int orderY, int count = 5)
     {
         int orderCellX = orderX / _cellSize;
         int orderCellY = orderY / _cellSize;

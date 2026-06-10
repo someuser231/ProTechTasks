@@ -49,6 +49,6 @@ public class SearchBenchmarks
     [Benchmark]
     public List<Driver> GridPartition()
     {
-        return _grid.FindNearest(_drivers, 500, 500, 5);
+        return _grid.FindNearest(500, 500, 5);
     }
 }
