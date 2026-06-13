@@ -12,8 +12,8 @@ if (args.Length > 0 && args[0] == "--benchmark")
 var builder = WebApplication.CreateBuilder(args);
 var app = builder.Build();
 
-int N = 100;
-int M = 100;
+int N = app.Configuration.GetSection("MapSettings").GetValue<int>("N");
+int M = app.Configuration.GetSection("MapSettings").GetValue<int>("M");
 
 var drivers = new List<Driver>();
 var random = new Random();
@@ -52,38 +52,44 @@ app.MapGet("/drivers", () =>
     return drivers;
 });
 
-app.MapPut("/drivers/{id}", (int id, int x, int y) =>
+app.MapPut("/drivers", (Driver request) =>
 {
-    if (x < 0 || x >= N || y < 0 || y >= M)
+    Driver existing = drivers.FirstOrDefault(d => d.Id == request.Id);
+
+    if (request.X < 0 || request.X >= N || request.Y < 0 || request.Y >= M)
     {
-        return Results.BadRequest($"Coordinates out of bounds. Valid range: 0 <= x < {N}, 0 <= y < {M}");
+        if (existing != null)
+        {
+            occupiedPositions.Remove((existing.X, existing.Y));
+            drivers.Remove(existing);
+            gridAlgorithm.BuildIndex(drivers);
+        }
+        return Results.BadRequest("Координаты некорректны");
     }
 
-    if (occupiedPositions.Contains((x, y)) && !drivers.Any(d => d.Id == id && d.X == x && d.Y == y))
+    if (occupiedPositions.Contains((request.X, request.Y)) && !(existing != null && existing.X == request.X && existing.Y == request.Y))
     {
-        return Results.BadRequest("The position is busy");
+        return Results.BadRequest("Здесь уже находится другой водитель");
     }
-
-    var existing = drivers.FirstOrDefault(d => d.Id == id);
 
     if (existing != null)
     {
         occupiedPositions.Remove((existing.X, existing.Y));
-        existing.X = x;
-        existing.Y = y;
-        occupiedPositions.Add((x, y));
+        existing.X = request.X;
+        existing.Y = request.Y;
+        occupiedPositions.Add((request.X, request.Y));
         gridAlgorithm.BuildIndex(drivers);
-        return Results.Ok(existing);
+        return Results.Ok("Координаты успешно изменены");
     }
 
-    occupiedPositions.Add((x, y));
-    var driver = new Driver();
-    driver.Id = id;
-    driver.X = x;
-    driver.Y = y;
+    occupiedPositions.Add((request.X, request.Y));
+    Driver driver = new Driver();
+    driver.Id = request.Id;
+    driver.X = request.X;
+    driver.Y = request.Y;
     drivers.Add(driver);
     gridAlgorithm.BuildIndex(drivers);
-    return Results.Created($"/drivers/{id}", driver);
+    return Results.Ok("Координаты успешно добавлены");
 });
 
 app.MapGet("/search", (int x, int y, HttpContext http) =>
