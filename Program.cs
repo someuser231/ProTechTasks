@@ -10,35 +10,23 @@ if (args.Length > 0 && args[0] == "--benchmark")
 }
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddHttpClient();
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
 var app = builder.Build();
 
-int N = 100;
-int M = 100;
+int parallelLimit = app.Configuration.GetSection("Settings").GetValue<int>("ParallelLimit");
+app.UseMiddleware<ProTechTasks.Middleware.ParallelLimitMiddleware>(parallelLimit);
+
+app.UseSwagger();
+app.UseSwaggerUI();
+
+int N = app.Configuration.GetSection("MapSettings").GetValue<int>("N");
+int M = app.Configuration.GetSection("MapSettings").GetValue<int>("M");
+bool allowMultiplePerCell = app.Configuration.GetSection("Settings").GetValue<bool>("AllowMultipleDriversPerCell");
 
 var drivers = new List<Driver>();
-var random = new Random();
 var occupiedPositions = new HashSet<(int, int)>();
-
-for (int i = 1; i <= 20; i++)
-{
-    int x;
-    int y;
-
-    do
-    {
-        x = random.Next(0, N);
-        y = random.Next(0, M);
-    }
-    while (occupiedPositions.Contains((x, y)));
-
-    occupiedPositions.Add((x, y));
-
-    var driver = new Driver();
-    driver.Id = i;
-    driver.X = x;
-    driver.Y = y;
-    drivers.Add(driver);
-}
 
 var linearAlgorithm = new LinearSortAlgorithm();
 var priorityQueueAlgorithm = new PriorityQueueAlgorithm();
@@ -52,38 +40,49 @@ app.MapGet("/drivers", () =>
     return drivers;
 });
 
-app.MapPut("/drivers/{id}", (int id, int x, int y) =>
+app.MapPut("/drivers", (Driver request) =>
 {
-    if (x < 0 || x >= N || y < 0 || y >= M)
+    Driver existing = drivers.FirstOrDefault(d => d.Id == request.Id);
+
+    if (request.X < 0 || request.X >= N || request.Y < 0 || request.Y >= M)
     {
-        return Results.BadRequest($"Coordinates out of bounds. Valid range: 0 <= x < {N}, 0 <= y < {M}");
+        if (existing != null)
+        {
+            occupiedPositions.Remove((existing.X, existing.Y));
+            drivers.Remove(existing);
+            gridAlgorithm.BuildIndex(drivers);
+            app.Logger.LogInformation("Водитель {Id} удалён из-за выхода за пределы карты ({X}, {Y})", request.Id, request.X, request.Y);
+        }
+        app.Logger.LogWarning("Некорректные координаты для водителя {Id}: ({X}, {Y})", request.Id, request.X, request.Y);
+        return Results.BadRequest("Координаты некорректны");
     }
 
-    if (occupiedPositions.Contains((x, y)) && !drivers.Any(d => d.Id == id && d.X == x && d.Y == y))
+    if (!allowMultiplePerCell && occupiedPositions.Contains((request.X, request.Y)) && !(existing != null && existing.X == request.X && existing.Y == request.Y))
     {
-        return Results.BadRequest("The position is busy");
+        app.Logger.LogWarning("Координаты ({X}, {Y}) заняты, запрос водителя {Id} отклонён", request.X, request.Y, request.Id);
+        return Results.BadRequest("Здесь уже находится другой водитель");
     }
-
-    var existing = drivers.FirstOrDefault(d => d.Id == id);
 
     if (existing != null)
     {
         occupiedPositions.Remove((existing.X, existing.Y));
-        existing.X = x;
-        existing.Y = y;
-        occupiedPositions.Add((x, y));
+        existing.X = request.X;
+        existing.Y = request.Y;
+        occupiedPositions.Add((request.X, request.Y));
         gridAlgorithm.BuildIndex(drivers);
-        return Results.Ok(existing);
+        app.Logger.LogInformation("Координаты водителя {Id} изменены на ({X}, {Y})", request.Id, request.X, request.Y);
+        return Results.Ok("Координаты успешно изменены");
     }
 
-    occupiedPositions.Add((x, y));
-    var driver = new Driver();
-    driver.Id = id;
-    driver.X = x;
-    driver.Y = y;
+    occupiedPositions.Add((request.X, request.Y));
+    Driver driver = new Driver();
+    driver.Id = request.Id;
+    driver.X = request.X;
+    driver.Y = request.Y;
     drivers.Add(driver);
     gridAlgorithm.BuildIndex(drivers);
-    return Results.Created($"/drivers/{id}", driver);
+    app.Logger.LogInformation("Добавлен водитель {Id} с координатами ({X}, {Y})", request.Id, request.X, request.Y);
+    return Results.Ok("Координаты успешно добавлены");
 });
 
 app.MapGet("/search", (int x, int y, HttpContext http) =>
@@ -117,6 +116,81 @@ app.MapGet("/search", (int x, int y, HttpContext http) =>
     };
 
     return Results.Ok(response);
+});
+
+app.MapPost("/orders", async (OrderRequest request, IHttpClientFactory httpClientFactory) =>
+{
+    if (request.X < 0 || request.X >= N || request.Y < 0 || request.Y >= M)
+    {
+        app.Logger.LogWarning("Некорректные координаты заказа {Id}: ({X}, {Y})", request.Id, request.X, request.Y);
+        return Results.BadRequest("Координаты некорректны");
+    }
+
+    if (drivers.Count == 0)
+    {
+        app.Logger.LogWarning("Нет свободных водителей для заказа {Id}", request.Id);
+        return Results.BadRequest("Свободных водителей нет");
+    }
+
+    List<Driver> nearest = gridAlgorithm.FindNearest(request.X, request.Y, 5);
+
+    if (nearest.Count == 0)
+    {
+        app.Logger.LogWarning("Нет свободных водителей для заказа {Id}", request.Id);
+        return Results.BadRequest("Свободных водителей нет");
+    }
+
+    int index = 0;
+    try
+    {
+        HttpClient client = httpClientFactory.CreateClient();
+        string url = $"http://www.randomnumberapi.com/api/v1.0/random?min=0&max={nearest.Count - 1}&count=1";
+        string response = await client.GetStringAsync(url);
+        int[] numbers = System.Text.Json.JsonSerializer.Deserialize<int[]>(response)!;
+        index = numbers[0];
+    }
+    catch
+    {
+        app.Logger.LogWarning("Удалённый API недоступен, используется локальный генератор случайных чисел");
+        Random rng = new Random();
+        index = rng.Next(0, nearest.Count);
+    }
+
+    Driver selectedDriver = nearest[index];
+
+    List<object> route = new List<object>();
+    int cx = selectedDriver.X;
+    int cy = selectedDriver.Y;
+
+    route.Add(new { x = cx, y = cy });
+
+    int stepX = request.X > cx ? 1 : -1;
+    while (cx != request.X)
+    {
+        cx += stepX;
+        route.Add(new { x = cx, y = cy });
+    }
+
+    int stepY = request.Y > cy ? 1 : -1;
+    while (cy != request.Y)
+    {
+        cy += stepY;
+        route.Add(new { x = cx, y = cy });
+    }
+
+    int routeLength = Math.Abs(selectedDriver.X - request.X) + Math.Abs(selectedDriver.Y - request.Y);
+
+    var result = new
+    {
+        driverId = selectedDriver.Id,
+        driverX = selectedDriver.X,
+        driverY = selectedDriver.Y,
+        routeLength = routeLength,
+        route = route
+    };
+
+    app.Logger.LogInformation("Заказу {Id} назначен водитель {DriverId}, длина маршрута {Length}", request.Id, selectedDriver.Id, routeLength);
+    return Results.Ok(result);
 });
 
 app.Run();
